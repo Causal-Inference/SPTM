@@ -1,4 +1,7 @@
+import os
 from sptm import *
+import numpy as np
+import cv2
 
 def check_if_close(first_point, second_point):
   if ((first_point[0] - second_point[0]) ** 2 +
@@ -59,6 +62,13 @@ class Navigator:
     self.goal_frame = goal_frame
     goal_localization_keyframe_index = self.process_memory(environment)
     self.not_localized_count = 0
+
+    # build temp folder to save frames and relative position
+    self.match_count = 0
+    self.cache_dir = os.path.join(EVALUATION_PATH, movie_path)
+    if not os.path.exists(self.cache_dir):
+      os.makedirs(self.cache_dir)
+      
     return goal_localization_keyframe_index
 
   def record_all(self, first_frame, second_frame, x, y):
@@ -98,6 +108,7 @@ class Navigator:
     else:
       self.not_localized_count = 0
 
+      
   def record_all_during_repeat(self, right_image):
     for index in xrange(-TEST_REPEAT, 0):
       left_image = self.screens[index]
@@ -123,8 +134,14 @@ class Navigator:
       target_frame = self.keyframes[-1]
     self.record_all_during_repeat(target_frame)
 
+  """NOTE: key step to extract the relatvie frame and position"""
+  """index is current one, self.nn is the relative keyframe"""
+  # here the index is the current stream ID
+  # self.screens[index], self.coordinates[index]
+  # self.keyframes[self.nn], self.keyframe_coordinates[self.nn]
   def policy_navigation_step(self, teach_and_repeat=False):
     self.set_intermediate_reachable_goal()
+    # if found new reconspondings
     if self.not_localized_count == 0:
       action_function = self._align_step_with_repeat
       action_function_arguments = (teach_and_repeat,)
@@ -137,8 +154,48 @@ class Navigator:
       if self.check_frozen_with_repeat():
         break
       action_function(*action_function_arguments)
-      self.record_all_during_repeat(self.keyframes[self.target_index])
 
+      #self.record_all_during_repeat(self.keyframes[self.target_index])
+
+    # print current matching result
+    print ("current match")
+    if self.nn != None:
+      self.ref_pose = np.array(self.keyframe_coordinates[self.nn][:2])
+      self.cur_pose = np.array(self.coordinates[-1][:2])
+      self.ref_frame = self.keyframes[self.nn]
+      self.cur_frame = self.screens[-1]
+      distance = np.linalg.norm(self.ref_pose - self.cur_pose)
+      if distance <=20:
+        self.save_match()
+
+  # pyin2, save images
+  def save_match(self):
+    #cur_img = save_img.astype(np.uint8)
+    #cur_img = cv2.cvtColor(save_img, cv2.COLOR_RGB2BGR)
+    h, w = self.cur_frame.shape[0], self.cur_frame.shape[1]
+    imA = cv2.resize(self.cur_frame, (w, h), interpolation=cv2.INTER_CUBIC)
+    imB = cv2.resize(self.ref_frame, (w, h), interpolation=cv2.INTER_CUBIC)
+    #print (h)
+    #print (w)
+    #print (imA.shape)
+    img = np.zeros((h*1, w*2, 3))
+    img[0:h, 0:w, :]     = imA
+    img[0:h, w:2*w, :]   = imB
+    cv2.imwrite(self.cache_dir+'/{0:05d}.png'.format(self.match_count), img)
+    #cv2.imwrite(self.cache_dir+'/cur_{0:05d}.png'.format(self.match_count), self.cur_frame)
+    #cv2.imwrite(self.cache_dir+'/ref_{0:05d}.png'.format(self.match_count), self.ref_frame)
+    # save pose
+    cur_pose = '{0:05d}'.format(self.match_count) + \
+               ' {0:02f}'.format(self.cur_pose[0])+ \
+               ' {0:02f}'.format(self.cur_pose[1])+ \
+               ' {0:02f}'.format(self.ref_pose[0])+ \
+               ' {0:02f}'.format(self.ref_pose[1])+'\n'
+    print (cur_pose)
+    with open(self.cache_dir+'/pose.txt','a+') as f:
+      f.write(cur_pose)
+    self.match_count += 1
+
+      
   def log_navigation_state(self):
     self.screens.append(self.game.get_state().screen_buffer.transpose(VIZDOOM_TO_TF))
     self.coordinates.append(self.game.get_state().game_variables)
