@@ -194,7 +194,6 @@ class Navigator:
     with open(self.cache_dir+'/pose.txt','a+') as f:
       f.write(cur_pose)
     self.match_count += 1
-
       
   def log_navigation_state(self):
     self.screens.append(self.game.get_state().screen_buffer.transpose(VIZDOOM_TO_TF))
